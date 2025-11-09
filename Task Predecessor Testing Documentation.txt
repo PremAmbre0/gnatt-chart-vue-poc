@@ -1,0 +1,1296 @@
+﻿Task Predecessor Testing Documentation
+Overview
+This document provides comprehensive test scenarios for the Task Predecessor functionality. The predecessor system allows tasks to be linked with dependency relationships, automatically calculating dates based on the predecessor's timeline.
+System Constraints
+* One Predecessor per Task: Each task can have only one predecessor
+* Multiple Successors: A task can be a predecessor to multiple tasks
+* No Circular Dependencies: System prevents dependency loops
+* Duration Preservation: Task duration is maintained when dates are recalculated
+* Four Link Types: SS (Start-to-Start), SF (Start-to-Finish), FF (Finish-to-Finish), FS (Finish-to-Start)
+* Lag Support: Positive or negative lag in days
+Predecessor Schema
+predecessor: {
+  taskId: ObjectId,     // Reference to predecessor task (null if none)
+  type: String,         // "SS" | "SF" | "FF" | "FS" (default: "FS")
+  lag: Number          // Days offset (default: 0)
+}
+
+
+________________
+
+
+1. Creating Tasks with Predecessors
+1.1 FS (Finish-to-Start) Link
+Description: Task starts after predecessor finishes
+Prerequisite: Predecessor Task exists with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Task 2 - FS Link",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-03",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-06 (day after predecessor ends)
+* Due Date: 2025-01-08 (3-day duration preserved)
+* Message: "Task created successfully!"
+________________
+
+
+1.2 SS (Start-to-Start) Link
+Description: Task starts when predecessor starts
+Prerequisite: Predecessor Task exists with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Task 2 - SS Link",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-04",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "SS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-01 (same as predecessor start)
+* Due Date: 2025-01-04 (4-day duration preserved)
+________________
+
+
+1.3 FF (Finish-to-Finish) Link
+Description: Task finishes when predecessor finishes
+Prerequisite: Predecessor Task exists with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Task 2 - FF Link",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-03",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FF",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-03 (3 days before predecessor ends)
+* Due Date: 2025-01-05 (same as predecessor end)
+* Duration: 3 days (preserved)
+________________
+
+
+1.4 SF (Start-to-Finish) Link
+Description: Task finishes when predecessor starts
+Prerequisite: Predecessor Task exists with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Task 2 - SF Link",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "SF",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2024-12-28 (5 days before predecessor starts)
+* Due Date: 2025-01-01 (same as predecessor start)
+* Duration: 5 days (preserved)
+________________
+
+
+1.5 Task with Positive Lag
+Description: Add delay after predecessor relationship
+Prerequisite: Predecessor Task exists with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Task 2 - FS with Positive Lag",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-03",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 2
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-08 (2 days after predecessor ends)
+* Due Date: 2025-01-10 (3-day duration preserved)
+________________
+
+
+1.6 Task with Negative Lag
+Description: Start before predecessor relationship point
+Prerequisite: Predecessor Task exists with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Task 2 - FS with Negative Lag",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-03",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": -2
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-04 (2 days before predecessor ends)
+* Due Date: 2025-01-06 (3-day duration preserved)
+________________
+
+
+1.7 Task without Predecessor
+Description: Create independent task with no dependencies
+Payload:
+{
+  "title": "Independent Task",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-01 (as provided)
+* Due Date: 2025-01-05 (as provided)
+* Predecessor: { taskId: null, type: "FS", lag: 0 }
+________________
+
+
+1.8 Task without Due Date (ERROR)
+Description: Attempt to create task with predecessor but no due date
+Payload:
+{
+  "title": "Task without Due Date",
+  "startDate": "2025-01-01",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Due date is required when setting a predecessor"
+________________
+
+
+2. Circular Dependency Validation
+2.1 Self-Reference (ERROR)
+Description: Task attempting to be its own predecessor
+Payload:
+{
+  "taskId": "TASK_A_ID",
+  "predecessor": {
+    "taskId": "TASK_A_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Circular dependency detected. Cannot create a task with itself as a predecessor."
+________________
+
+
+2.2 Direct Circular Dependency (ERROR)
+Description: Two tasks referencing each other (A → B → A)
+Setup:
+1. Create Task A (no predecessor)
+2. Create Task B with Task A as predecessor
+3. Attempt to update Task A with Task B as predecessor
+Payload (Step 3):
+{
+  "taskId": "TASK_A_ID",
+  "predecessor": {
+    "taskId": "TASK_B_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Circular dependency detected. This predecessor would create a dependency loop."
+________________
+
+
+2.3 Indirect Circular Dependency (ERROR)
+Description: Chain of dependencies forming a loop (A → B → C → A)
+Setup:
+1. Create Task A (no predecessor)
+2. Create Task B (predecessor: Task A)
+3. Create Task C (predecessor: Task B)
+4. Attempt to update Task A (predecessor: Task C)
+Payload (Step 4):
+{
+  "taskId": "TASK_A_ID",
+  "predecessor": {
+    "taskId": "TASK_C_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Circular dependency detected. This predecessor would create a dependency loop."
+________________
+
+
+3. Updating Predecessors
+3.1 Add Predecessor to Existing Task
+Description: Add predecessor to task that had none
+Prerequisite: Task exists without predecessor
+Payload:
+{
+  "taskId": "TASK_ID",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Dates: Recalculated based on predecessor
+* Duration: Preserved from original task
+________________
+
+
+3.2 Change Predecessor to Different Task
+Description: Replace existing predecessor with a different task
+Prerequisite: Task has Predecessor A
+Payload:
+{
+  "taskId": "TASK_ID",
+  "predecessor": {
+    "taskId": "NEW_PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Dates: Recalculated based on new predecessor
+* Duration: Preserved
+________________
+
+
+3.3 Change Link Type
+Description: Change the type of predecessor relationship
+Prerequisite: Task has FS link to predecessor
+Payload:
+{
+  "taskId": "TASK_ID",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "SS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Dates: Recalculated using SS logic
+* Duration: Preserved
+________________
+
+
+3.4 Change Lag Value
+Description: Modify the lag between predecessor and task
+Prerequisite: Task has predecessor with 0 lag
+Payload:
+{
+  "taskId": "TASK_ID",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 3
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Dates: Shifted by 3 days
+* Duration: Preserved
+________________
+
+
+3.5 Remove Predecessor
+Description: Remove predecessor from task
+Prerequisite: Task has a predecessor
+Payload:
+{
+  "taskId": "TASK_ID",
+  "predecessor": {
+    "taskId": null
+  },
+ }
+
+
+Expected Result:
+* Success: true
+* Dates: Unchanged
+* Predecessor: Set to null
+________________
+
+
+3.6 Manual Date Update with Predecessor (ERROR)
+Description: Attempt to manually change dates when task has predecessor
+Prerequisite: Task has a predecessor
+Payload:
+{
+  "taskId": "TASK_ID",
+  "startDate": "2025-02-01",
+  "dueDate": "2025-02-05",
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Cannot manually update dates for a task with a predecessor. Update the predecessor relationship instead."
+________________
+
+
+4. Cascade Updates (Successor Chain)
+4.1 Update Predecessor Affects Single Successor
+Description: Changing predecessor dates cascades to successor
+Setup: Task A → Task B (FS, 0 lag)
+* Task A: Start: 2025-01-01, Due: 2025-01-05
+* Task B: Start: 2025-01-06, Due: 2025-01-10
+Payload:
+{
+  "taskId": "TASK_A_ID",
+  "dueDate": "2025-01-10",
+  }
+
+
+Expected Result:
+* Task A:
+   * Success: true
+   * Due Date: 2025-01-10
+* Task B (auto-updated):
+   * Start Date: 2025-01-11 (updated)
+   * Due Date: 2025-01-15 (5-day duration preserved)
+________________
+
+
+4.2 Multiple Successors Update
+Description: One task with multiple dependent tasks
+Setup:
+* Task A → Task B (FS)
+* Task A → Task C (FS)
+* Task A → Task D (FS)
+Payload:
+{
+  "taskId": "TASK_A_ID",
+  "dueDate": "2025-01-15",
+  
+}
+
+
+Expected Result:
+* Task A: Updated to new due date
+* Task B, C, D: All recalculated based on Task A's new date
+* All durations: Preserved
+________________
+
+
+4.3 Long Chain Update
+Description: Update propagates through entire chain
+Setup: Task A → Task B → Task C → Task D → Task E
+Payload:
+{
+  "taskId": "TASK_A_ID",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-10",
+  
+}
+
+
+Expected Result:
+* Task A: Updated
+* Task B: Recalculated based on A
+* Task C: Recalculated based on B
+* Task D: Recalculated based on C
+* Task E: Recalculated based on D
+* All durations: Preserved
+________________
+
+
+5. Edge Cases
+5.1 Invalid Link Type (ERROR)
+Payload:
+{
+  "title": "Task with Invalid Link",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "INVALID",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Invalid link type. Must be one of: SS, SF, FF, FS"
+________________
+
+
+5.2 Non-Numeric Lag (ERROR)
+Payload:
+{
+  "title": "Task with Invalid Lag",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": "two"
+  },
+}
+
+
+Expected Result:
+* Success: false
+* Message: "Lag must be a number."
+________________
+
+
+5.3 Non-Existent Predecessor (ERROR)
+Payload:
+{
+  "title": "Task with Invalid Predecessor",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+  "predecessor": {
+    "taskId": "INVALID_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+ }
+
+
+Expected Result:
+* Success: false
+* Message: "Predecessor task not found."
+________________
+
+
+5.4 Very Long Duration Task
+Description: Task with 365-day duration
+Prerequisite: Predecessor Task with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Long Duration Task",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-12-31",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-06
+* Due Date: 2026-01-05 (365-day duration preserved)
+________________
+
+
+5.5 Single Day Duration Task
+Description: Task that starts and ends on same day
+Prerequisite: Predecessor Task with Start: 2025-01-01, Due: 2025-01-05
+Payload:
+{
+  "title": "Single Day Task",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-01",
+  "predecessor": {
+    "taskId": "PREDECESSOR_TASK_ID",
+    "type": "FS",
+    "lag": 0
+  },
+ 
+}
+
+
+Expected Result:
+* Success: true
+* Start Date: 2025-01-06
+* Due Date: 2025-01-06 (1-day duration preserved)
+________________
+
+
+6. Complex Scenarios
+6.1 Multiple Link Types in Chain
+Description: Chain with different link types
+Setup:
+* Task A (independent): Start: 2025-01-01, Due: 2025-01-05
+* Task B (SS with A): Starts same time as A
+* Task C (FS with B, lag 1): Starts 1 day after B ends
+* Task D (FF with C): Finishes same time as C
+Task B Payload:
+{
+  "title": "Task B",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-03",
+  "predecessor": {
+    "taskId": "TASK_A_ID",
+    "type": "SS",
+    "lag": 0
+  },
+}
+
+
+Expected for B:
+* Start: 2025-01-01 (SS with A)
+* Due: 2025-01-03 (3-day duration)
+Task C Payload:
+{
+  "title": "Task C",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-04",
+  "predecessor": {
+    "taskId": "TASK_B_ID",
+    "type": "FS",
+    "lag": 1
+  },
+ }
+
+
+Expected for C:
+* Start: 2025-01-05 (1 day after B ends)
+* Due: 2025-01-08 (4-day duration)
+Task D Payload:
+{
+  "title": "Task D",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+  "predecessor": {
+    "taskId": "TASK_C_ID",
+    "type": "FF",
+    "lag": 0
+  },
+ }
+
+
+Expected for D:
+* Start: 2025-01-04 (5 days before C ends)
+* Due: 2025-01-08 (FF with C)
+________________
+
+
+6.2 Multiple Successors (Branch Pattern)
+Description: One predecessor feeding multiple tasks
+Setup:
+      Task B (FS)
+      /
+Task A 
+      \
+       Task C (SS)
+
+
+Task A (independent):
+* Start: 2025-01-01
+* Due: 2025-01-05
+Task B Payload:
+{
+  "title": "Task B",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-05",
+  "predecessor": {
+    "taskId": "TASK_A_ID",
+    "type": "FS",
+    "lag": 0
+  },
+}
+
+
+Expected for B:
+* Start: 2025-01-06
+* Due: 2025-01-10
+Task C Payload:
+{
+  "title": "Task C",
+  "startDate": "2025-01-01",
+  "dueDate": "2025-01-10",
+  "predecessor": {
+    "taskId": "TASK_A_ID",
+    "type": "SS",
+    "lag": 0
+  },
+}
+
+
+Expected for C:
+* Start: 2025-01-01
+* Due: 2025-01-10
+Update Task A:
+{
+  "taskId": "TASK_A_ID",
+  "dueDate": "2025-01-08",
+  
+}
+
+
+Expected Cascade:
+* Task A: Due changed to 2025-01-08
+* Task B: Start: 2025-01-09, Due: 2025-01-13 (updated)
+* Task C: Start: 2025-01-01, Due: 2025-01-10 (unchanged - SS link)
+________________
+
+
+7. Verification Checklist
+For each test case, verify:
+Response Validation
+* [ ] success field is correct (true/false)
+* [ ] message field contains appropriate message
+* [ ] data object returned (if success)
+Database Validation
+* [ ] Task predecessor.taskId is correct
+* [ ] Task predecessor.type is correct
+* [ ] Task predecessor.lag is correct
+* [ ] startDate is correctly calculated
+* [ ] dueDate is correctly calculated
+* [ ] estimatedDuration matches date difference
+Duration Validation
+* [ ] Duration = (dueDate - startDate) + 1 day
+* [ ] Duration preserved after date recalculation
+Cascade Validation (if applicable)
+* [ ] All successor tasks updated
+* [ ] Successor dates calculated correctly
+* [ ] No broken chains
+Circular Dependency Validation
+* [ ] No task is its own predecessor
+* [ ] No circular chains exist
+* [ ] Error returned when circular dependency attempted
+________________
+
+
+8. Test Execution Order
+Phase 1: Basic Creation
+1. Test all 4 link types (FS, SS, FF, SF)
+2. Test with positive/negative lag
+3. Test without predecessor
+4. Test error cases (no due date, invalid data)
+Phase 2: Updates
+1. Add predecessor to independent task
+2. Change predecessor task
+3. Change link type
+4. Change lag value
+5. Remove predecessor
+6. Test manual date update error
+Phase 3: Circular Dependencies
+1. Self-reference test
+2. Direct circular (A→B→A)
+3. Indirect circular (A→B→C→A)
+4. Long chain circular
+Phase 4: Cascades
+1. Simple chain (A→B)
+2. Medium chain (A→B→C)
+3. Long chain (A→B→C→D→E)
+4. Multiple successors (A→B,C,D)
+Phase 5: Edge Cases
+1. Invalid link types
+2. Invalid lag values
+3. Non-existent predecessors
+4. Extreme durations (1 day, 365 days)
+Phase 6: Complex Scenarios
+1. Mixed link types
+2. Branch patterns
+3. Update cascades in complex structures
+________________
+
+
+9. Common Issues & Debugging
+Issue: Dates Not Recalculating
+Check:
+* Predecessor task exists in database
+* Predecessor has valid startDate and dueDate
+* Link type is valid (SS, SF, FF, FS)
+* Lag is a number
+Issue: Duration Not Preserved
+Check:
+* Original task has both startDate and dueDate
+* Duration calculation: moment(dueDate).diff(moment(startDate), 'days') + 1
+* No rounding errors in date calculations
+Issue: Cascade Not Working
+Check:
+* Task has successors (other tasks reference it as predecessor)
+* updateSuccessorDates function is called
+* Recursive updates are working
+* No errors in successor chain
+Issue: Circular Dependency Not Detected
+Check:
+* checkCircularDependency function is called
+* BFS traversal is working correctly
+* Visited set is being tracked
+* All predecessor chains are checked
+
+
+dummy task data
+
+
+
+   "tasks": [
+            {
+                "_id": "6909dcb21bb490a8394fa07e",
+                "templateId": "68bfda91c898e16075f0f6c9",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "671bdf7ca871ce3d248b70fb",
+                "title": "Task 1 predecessor",
+                "pinned": false,
+                "description": null,
+                "dueDate": "2025-01-05T18:29:59.000Z",
+                "startDate": "2025-01-01T18:29:59.000Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "plannedStartDate": null,
+                "plannedEndDate": null,
+                "completionPercentage": 0,
+                "projectedEndDate": null,
+                "estimatedDuration": 5,
+                "actualDuration": null,
+                "taskType": "TASK",
+                "phase": {},
+                "assignee": [],
+                "owners": [],
+                "tags": [],
+                "dependencies": [],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 172,
+                "bgColor": "#ffffff",
+                "timezone": "Asia/Kolkata",
+                "reminders": false,
+                "delayDays": 0,
+                "priority": "Low",
+                "predecessor": null,
+                "subtasks": []
+            },
+            {
+                "_id": "6909de8ea74f4863d87f4f94",
+                "templateId": "68bfda91c898e16075f0f6c9",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "671bdf7ca871ce3d248b70fb",
+                "title": "Task 3 - SS Link",
+                "pinned": false,
+                "description": null,
+                "dueDate": "2025-01-05T18:29:59.000Z",
+                "startDate": "2025-01-01T18:29:59.000Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "plannedStartDate": null,
+                "plannedEndDate": null,
+                "completionPercentage": 0,
+                "projectedEndDate": null,
+                "estimatedDuration": 5,
+                "actualDuration": null,
+                "taskType": "TASK",
+                "phase": {},
+                "assignee": [],
+                "owners": [],
+                "tags": [],
+                "dependencies": [],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 174,
+                "bgColor": "#ffffff",
+                "timezone": "Asia/Kolkata",
+                "reminders": false,
+                "delayDays": 0,
+                "priority": "Low",
+                "predecessor": {
+                    "taskId": "6909dcb21bb490a8394fa07e",
+                    "title": "Task 1 predecessor",
+                    "lag": 0,
+                    "type": "SS"
+                },
+                "subtasks": []
+            },
+            {
+                "_id": "6909de2ba74f4863d87f4f7f",
+                "templateId": "68bfda91c898e16075f0f6c9",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "671bdf7ca871ce3d248b70fb",
+                "title": "Task 2 - FS Link",
+                "pinned": false,
+                "description": null,
+                "dueDate": "2025-01-08T18:29:59.000Z",
+                "startDate": "2025-01-05T18:29:59.000Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "plannedStartDate": null,
+                "plannedEndDate": null,
+                "completionPercentage": 0,
+                "projectedEndDate": null,
+                "estimatedDuration": 4,
+                "actualDuration": null,
+                "taskType": "TASK",
+                "phase": {},
+                "assignee": [],
+                "owners": [],
+                "tags": [],
+                "dependencies": [],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 173,
+                "bgColor": "#ffffff",
+                "timezone": "Asia/Kolkata",
+                "reminders": false,
+                "delayDays": 0,
+                "priority": "Low",
+                "predecessor": {
+                    "taskId": "6909dcb21bb490a8394fa07e",
+                    "title": "Task 1 predecessor",
+                    "lag": 0,
+                    "type": "FS"
+                },
+                "subtasks": []
+            },
+            {
+                "_id": "6909df1ba74f4863d87f4fab",
+                "templateId": "68bfda91c898e16075f0f6c9",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "671bdf7ca871ce3d248b70fb",
+                "title": "Task - FS with Positive Lag",
+                "pinned": false,
+                "description": null,
+                "dueDate": "2025-01-10T18:29:59.000Z",
+                "startDate": "2025-01-07T18:29:59.000Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "plannedStartDate": null,
+                "plannedEndDate": null,
+                "completionPercentage": 0,
+                "projectedEndDate": null,
+                "estimatedDuration": 4,
+                "actualDuration": null,
+                "taskType": "TASK",
+                "phase": {},
+                "assignee": [],
+                "owners": [],
+                "tags": [],
+                "dependencies": [],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 175,
+                "bgColor": "#ffffff",
+                "timezone": "Asia/Kolkata",
+                "reminders": false,
+                "delayDays": 0,
+                "priority": "Low",
+                "predecessor": {
+                    "taskId": "6909dcb21bb490a8394fa07e",
+                    "title": "Task 1 predecessor",
+                    "lag": 2,
+                    "type": "FS"
+                },
+                "subtasks": []
+            },
+            {
+                "_id": "683ecaeec1262bf50e757a3e",
+                "templateId": "671732d9db5e873587a9dcdf",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "671bdf7ca871ce3d248b70fc",
+                "title": "test update",
+                "pinned": false,
+                "description": "",
+                "dueDate": "2025-06-26T18:29:59.999Z",
+                "startDate": "2025-06-02T18:30:00.000Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "estimatedDuration": 24,
+                "actualDuration": null,
+                "taskType": "MILESTONE",
+                "assignee": [
+                    {
+                        "_id": "676272cab72e3c3c0c822946",
+                        "name": "Ajab child 1",
+                        "email": "ajeeb1@yopmail.com",
+                        "phone": "919604496904",
+                        "colour": "#3098f2",
+                        "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/image2%20%284%29.png",
+                        "notifications": "maximum",
+                        "accountType": "child"
+                    },
+                    {
+                        "_id": "67b43806dd41259e7129a17a",
+                        "name": "username",
+                        "email": "test20000@yopmail.com",
+                        "phone": null,
+                        "colour": "#1ce128",
+                        "dpUrl": null,
+                        "notifications": "maximum",
+                        "accountType": "child"
+                    }
+                ],
+                "owners": [
+                    {
+                        "_id": "676272cab72e3c3c0c822946",
+                        "name": "Ajab child 1",
+                        "email": "ajeeb1@yopmail.com",
+                        "phone": "919604496904",
+                        "colour": "#3098f2",
+                        "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/image2%20%284%29.png",
+                        "notifications": "maximum",
+                        "accountType": "child"
+                    }
+                ],
+                "tags": [],
+                "dependencies": [
+                    "683edbaec1262bf50e757d30"
+                ],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 50,
+                "timezone": "Asia/Calcutta",
+                "bgColor": "#FFFFFF",
+                "reminders": false,
+                "delayDays": null,
+                "priority": "SOS",
+                "predecessor": null,
+                "phase": {},
+                "subtasks": [
+                    {
+                        "_id": "683edbaec1262bf50e757d30",
+                        "title": "test 1",
+                        "description": null,
+                        "templateId": "671732d9db5e873587a9dcdf",
+                        "taskType": "TASK",
+                        "statusId": "671bdf7ca871ce3d248b70fb",
+                        "projectId": null,
+                        "estimatedStartDate": null,
+                        "estimatedDuration": 4,
+                        "startDate": "2025-06-03T11:25:34.339Z",
+                        "dueDate": "2025-06-06T18:29:59.999Z",
+                        "endDate": null,
+                        "priority": "Low",
+                        "assignee": [
+                            {
+                                "_id": "67b43806dd41259e7129a17a",
+                                "name": "username",
+                                "email": "test20000@yopmail.com",
+                                "phone": null,
+                                "colour": "#1ce128",
+                                "dpUrl": null,
+                                "notifications": "maximum",
+                                "accountType": "child"
+                            },
+                            {
+                                "_id": "676272cab72e3c3c0c822946",
+                                "name": "Ajab child 1",
+                                "email": "ajeeb1@yopmail.com",
+                                "phone": "919604496904",
+                                "colour": "#3098f2",
+                                "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/image2%20%284%29.png",
+                                "notifications": "maximum",
+                                "accountType": "child"
+                            }
+                        ],
+                        "files": [],
+                        "tags": [],
+                        "predecessor": {},
+                        "dependencies": [],
+                        "parentTask": "683ecaeec1262bf50e757a3e",
+                        "timezone": "Asia/Calcutta",
+                        "taskNumber": 51,
+                        "createdBy": {
+                            "_id": "675c0fd3ef2bc5b6956e3543",
+                            "name": "Ajab Raja",
+                            "email": "ajabraja9@gmail.com",
+                            "phone": "919604496996",
+                            "colour": "#3098f2",
+                            "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                            "notifications": "maximum",
+                            "accountType": "root"
+                        },
+                        "completedAt": null,
+                        "owners": [],
+                        "bgColor": "#FFFFFF",
+                        "assignedBy": {
+                            "_id": "675c0fd3ef2bc5b6956e3543",
+                            "name": "Ajab Raja",
+                            "email": "ajabraja9@gmail.com",
+                            "phone": "919604496996",
+                            "colour": "#3098f2",
+                            "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                            "notifications": "maximum",
+                            "accountType": "root"
+                        }
+                    }
+                ]
+            },
+            {
+                "_id": "6889cf347d3e283899b13c52",
+                "templateId": "671732d9db5e873587a9dcdf",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "68b699c3fcf0e64b37cd0d07",
+                "title": "Test 2",
+                "pinned": false,
+                "description": null,
+                "dueDate": "2025-08-02T18:29:59.999Z",
+                "startDate": "2025-07-30T07:52:20.036Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "estimatedDuration": 4,
+                "actualDuration": null,
+                "taskType": "MILESTONE",
+                "assignee": [],
+                "owners": [],
+                "tags": [],
+                "dependencies": [],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 89,
+                "timezone": "Asia/Calcutta",
+                "reminders": false,
+                "delayDays": null,
+                "priority": "Low",
+                "predecessor": null,
+                "phase": {},
+                "subtasks": []
+            },
+            {
+                "_id": "68e7b48fe4980b0f930a9c22",
+                "templateId": "68bfda91c898e16075f0f6c9",
+                "projectId": "6769373f47b093def6ac4e78",
+                "statusId": "671bdf7ca871ce3d248b70fc",
+                "title": "testtt4545",
+                "pinned": false,
+                "description": "",
+                "dueDate": "2025-10-12T18:29:59.999Z",
+                "startDate": "2025-10-08T18:30:00.000Z",
+                "estimatedStartDate": null,
+                "endDate": null,
+                "completedAt": null,
+                "estimatedDuration": 4,
+                "actualDuration": null,
+                "taskType": "TASK",
+                "assignee": [
+                    {
+                        "_id": "6798b3789efdb8e21e7456be",
+                        "name": "Ajab",
+                        "email": "ajeeb21@yopmail.com",
+                        "phone": null,
+                        "colour": "#36b86a",
+                        "dpUrl": null,
+                        "notifications": "maximum",
+                        "accountType": "child"
+                    },
+                    {
+                        "_id": "6798cd87079db2c4401bbb1e",
+                        "name": "Ajab",
+                        "email": "ajabtest21@yopmail.com",
+                        "phone": null,
+                        "colour": "#7d033a",
+                        "dpUrl": null,
+                        "notifications": "maximum",
+                        "accountType": "child"
+                    },
+                    {
+                        "_id": "67adb10ea25a695f0dbcaf5c",
+                        "name": "Ajab",
+                        "email": "ajeeb1234@yopmail.com",
+                        "phone": null,
+                        "colour": "#cc40a4",
+                        "dpUrl": null,
+                        "notifications": "maximum",
+                        "accountType": "child"
+                    }
+                ],
+                "owners": [],
+                "tags": [],
+                "dependencies": [
+                    "68e7b5d5e4980b0f930a9cd8"
+                ],
+                "createdBy": {
+                    "_id": "675c0fd3ef2bc5b6956e3543",
+                    "name": "Ajab Raja",
+                    "email": "ajabraja9@gmail.com",
+                    "phone": "919604496996",
+                    "colour": "#3098f2",
+                    "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                    "notifications": "maximum",
+                    "accountType": "root"
+                },
+                "files": [],
+                "taskNumber": 153,
+                "bgColor": "#FFFFFF",
+                "timezone": "Asia/Calcutta",
+                "reminders": false,
+                "delayDays": null,
+                "priority": "High",
+                "predecessor": null,
+                "phase": {},
+                "subtasks": [
+                    {
+                        "_id": "68e7b5d5e4980b0f930a9cd8",
+                        "title": "test4534",
+                        "description": null,
+                        "templateId": "68bfda91c898e16075f0f6c9",
+                        "taskType": "MILESTONE",
+                        "statusId": "671bdf7ca871ce3d248b70fb",
+                        "projectId": null,
+                        "estimatedStartDate": null,
+                        "estimatedDuration": 1,
+                        "startDate": "2025-10-09T13:17:09.485Z",
+                        "dueDate": "2025-10-09T18:29:59.999Z",
+                        "endDate": null,
+                        "priority": "Medium",
+                        "assignee": [
+                            {
+                                "_id": "6798b3789efdb8e21e7456be",
+                                "name": "Ajab",
+                                "email": "ajeeb21@yopmail.com",
+                                "phone": null,
+                                "colour": "#36b86a",
+                                "dpUrl": null,
+                                "notifications": "maximum",
+                                "accountType": "child"
+                            },
+                            {
+                                "_id": "6798cd87079db2c4401bbb1e",
+                                "name": "Ajab",
+                                "email": "ajabtest21@yopmail.com",
+                                "phone": null,
+                                "colour": "#7d033a",
+                                "dpUrl": null,
+                                "notifications": "maximum",
+                                "accountType": "child"
+                            },
+                            {
+                                "_id": "67adb10ea25a695f0dbcaf5c",
+                                "name": "Ajab",
+                                "email": "ajeeb1234@yopmail.com",
+                                "phone": null,
+                                "colour": "#cc40a4",
+                                "dpUrl": null,
+                                "notifications": "maximum",
+                                "accountType": "child"
+                            }
+                        ],
+                        "files": [],
+                        "tags": [],
+                        "predecessor": {},
+                        "dependencies": [],
+                        "parentTask": "68e7b48fe4980b0f930a9c22",
+                        "timezone": "Asia/Calcutta",
+                        "taskNumber": 155,
+                        "createdBy": {
+                            "_id": "675c0fd3ef2bc5b6956e3543",
+                            "name": "Ajab Raja",
+                            "email": "ajabraja9@gmail.com",
+                            "phone": "919604496996",
+                            "colour": "#3098f2",
+                            "dpUrl": "https://foyr-manage-tasks.s3.ap-south-1.amazonaws.com/slack-icon-256x256-g4bd4yg3.png",
+                            "notifications": "maximum",
+                            "accountType": "root"
+                        },
+                        "completedAt": null,
+                        "owners": [],
+                        "bgColor": "#7FBB49"
+                    }
+                ]
+            }
+        ]
